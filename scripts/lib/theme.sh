@@ -345,21 +345,31 @@ create_theme_with_retry() {
       LAST_UPLOAD_OUTPUT="$OUTPUT"
       
       echo "🔍 Checking theme creation output..."
-      
-      # First check if this is a rate limit error
-      if echo "$OUTPUT" | grep -qi "limit\|maximum\|exceeded\|too many"; then
-        echo "⚠️ Theme limit error detected"
-        if [ "$limit_cleanup_attempted" = false ] && handle_theme_limit; then
-          limit_cleanup_attempted=true
-          echo "🔄 Retrying theme creation after cleanup..."
-          attempt=$((attempt + 1))
-          sleep 2
-          continue
-        fi
 
-        THEME_ERRORS="Theme limit reached and older previews could not be removed automatically."
-        # Don't post comment here - let deploy.sh handle it
-        return 1
+      # Only classify a failed push as a theme-limit error. Successful Shopify CLI
+      # output can contain words such as "maximum" or "limit" in warnings or theme
+      # content, so matching those words without checking the exit status creates
+      # false failures after Shopify has already created the theme.
+      local theme_limit_pattern="theme limit (reached|exceeded)|reached (the )?(maximum )?(number of )?themes|maximum (number of )?themes|too many themes|more than [0-9]+ themes"
+      if [ "$status" -ne 0 ]; then
+        echo "❌ Shopify theme push failed with exit status ${status}"
+        echo "📝 Shopify CLI output:"
+        printf '%s\n' "$OUTPUT"
+
+        if echo "$OUTPUT" | grep -Eqi "$theme_limit_pattern"; then
+          echo "⚠️ Theme limit error detected"
+          if [ "$limit_cleanup_attempted" = false ] && handle_theme_limit; then
+            limit_cleanup_attempted=true
+            echo "🔄 Retrying theme creation after cleanup..."
+            attempt=$((attempt + 1))
+            sleep 2
+            continue
+          fi
+
+          THEME_ERRORS="Theme limit reached and older previews could not be removed automatically."
+          # Don't post comment here - let deploy.sh handle it
+          return 1
+        fi
       fi
 
       # Extract JSON from the output
@@ -442,12 +452,12 @@ create_theme_with_retry() {
         THEME_ERRORS="Failed to extract theme ID from Shopify response"
         return 1
       else
-        # No JSON found - check for rate limit
-        if echo "$OUTPUT" | grep -qi "limit\|maximum\|exceeded\|too many"; then
-          # Only retry for rate limit errors
+        # No JSON found - retry only for a failed push with a genuine theme-limit error
+        if [ "$status" -ne 0 ] && echo "$OUTPUT" | grep -Eqi "$theme_limit_pattern"; then
+          # Only retry for theme-limit errors
           attempt=$((attempt + 1))
           if [ $attempt -lt $max_retries ]; then
-            echo "⚠️ Rate limit detected, waiting 30 seconds before retry..."
+            echo "⚠️ Theme limit detected, waiting 30 seconds before retry..."
             sleep 30
             continue
           fi
