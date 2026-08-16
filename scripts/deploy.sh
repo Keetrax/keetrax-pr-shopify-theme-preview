@@ -118,7 +118,19 @@ echo "🔍 Checking for existing theme..."
 # (variable assignments inside backgrounded subshells don't propagate)
 COMMENTS_TMP=$(mktemp)
 THEME_LIST_TMP=$(mktemp)
-trap 'rm -f "$COMMENTS_TMP" "$THEME_LIST_TMP"' EXIT
+PR_CHANGED_FILES_FILE=$(mktemp)
+PR_FILES_LOOKUP_OK=false
+
+if fetch_pr_changed_files "$PR_NUMBER" > "$PR_CHANGED_FILES_FILE"; then
+  PR_FILES_LOOKUP_OK=true
+  echo "✅ Loaded $(wc -l < "$PR_CHANGED_FILES_FILE" | tr -d ' ') PR changed file(s) from GitHub"
+else
+  : > "$PR_CHANGED_FILES_FILE"
+  echo "⚠️ Warning: Could not fetch the PR changed-file list. Continuing without PR-specific pull ignores or JSON pushes."
+fi
+export PR_CHANGED_FILES_FILE PR_FILES_LOOKUP_OK
+
+trap 'rm -f "$COMMENTS_TMP" "$THEME_LIST_TMP" "$PR_CHANGED_FILES_FILE"' EXIT
 
 fetch_pr_comments "$PR_NUMBER" > "$COMMENTS_TMP" &
 COMMENTS_PID=$!
@@ -211,7 +223,7 @@ if [ -n "${EXISTING_THEME_ID}" ]; then
     echo "⬇️ Pulling JSON configuration and block files (excluding settings_schema.json and en.default locale files)..."
 
     # Build custom ignore flags from IGNORE_FILES (also applied during pull)
-    pull_ignore_flags=$(build_ignore_flags)
+    pull_ignore_flags="$(build_ignore_flags)$(build_pr_pull_ignore_flags)"
 
     # Pull JSON files and block definitions to preserve settings and ensure block types match templates.
     # Exclude files that must come from codebase:
@@ -238,7 +250,7 @@ if [ -n "${EXISTING_THEME_ID}" ]; then
     include_json_flag="true"
   fi
   
-  if upload_theme "${EXISTING_THEME_ID}" "$include_json_flag" && push_missing_json_files "${EXISTING_THEME_ID}"; then
+  if upload_theme "${EXISTING_THEME_ID}" "$include_json_flag" && push_pr_json_files "${EXISTING_THEME_ID}"; then
     echo "✅ Theme ${EXISTING_THEME_ID} updated successfully!"
     
     # Get preview URL for existing theme
@@ -322,7 +334,7 @@ if [ "$HAS_NO_SYNC_LABEL" = "false" ]; then
   echo "⬇️ Pulling JSON configuration and block files (excluding settings_schema.json and en.default locale files)..."
 
   # Build custom ignore flags from IGNORE_FILES (also applied during pull)
-  custom_ignore_flags=$(build_ignore_flags)
+  custom_ignore_flags="$(build_ignore_flags)$(build_pr_pull_ignore_flags)"
 
   # Pull JSON files and block definitions to get current settings and ensure block types match templates.
   # Exclude files that must come from codebase:
@@ -338,7 +350,7 @@ else
   echo "⏭️ Skipping JSON configuration pull due to 'no-sync' label"
 fi
 
-if create_theme_with_retry "${THEME_NAME}"; then
+if create_theme_with_retry "${THEME_NAME}" && push_pr_json_files "${CREATED_THEME_ID}"; then
   echo "🎉 Theme created and deployed successfully!"
   
   # Get preview URL

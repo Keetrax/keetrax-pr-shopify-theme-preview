@@ -175,6 +175,52 @@ pr_has_label() {
   " -- "$label_name"
 }
 
+# Fetch every file touched by a pull request. GitHub caps this endpoint at
+# 100 files per page, so continue until a short page is returned.
+fetch_pr_changed_files() {
+  local pr_number="$1"
+  local repo="${GITHUB_REPOSITORY}"
+  local page=1
+  local per_page=100
+  local response
+  local parsed
+  local count
+
+  while true; do
+    if ! response=$(github_api "/repos/${repo}/pulls/${pr_number}/files?per_page=${per_page}&page=${page}"); then
+      return 1
+    fi
+
+    if ! parsed=$(printf '%s' "$response" | node -e '
+      const input = require("fs").readFileSync(0, "utf8");
+      try {
+        const files = JSON.parse(input);
+        if (!Array.isArray(files) || files.some(file => typeof file.filename !== "string")) process.exit(1);
+        process.stdout.write(files.map(file => file.filename).join("\n"));
+      } catch (_) {
+        process.exit(1);
+      }
+    '); then
+      echo "⚠️ GitHub returned an invalid PR file list on page ${page}" >&2
+      return 1
+    fi
+
+    count=$(printf '%s' "$response" | node -e '
+      const files = JSON.parse(require("fs").readFileSync(0, "utf8"));
+      process.stdout.write(String(files.length));
+    ')
+
+    if [ -n "$parsed" ]; then
+      printf '%s\n' "$parsed"
+    fi
+
+    if [ "$count" -lt "$per_page" ]; then
+      break
+    fi
+    page=$((page + 1))
+  done
+}
+
 # Export functions for use in other scripts
 export -f github_api
 export -f find_comment_with_theme_id
@@ -182,3 +228,4 @@ export -f update_pr_comment
 export -f post_pr_comment
 export -f fetch_pr_comments
 export -f pr_has_label
+export -f fetch_pr_changed_files
