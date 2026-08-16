@@ -230,41 +230,100 @@ build_pr_pull_ignore_flags() {
   done < "$PR_CHANGED_FILES_FILE"
 }
 
-# Push every JSON file touched by the PR using explicit --only flags. The
-# normal upload continues to protect all other merchant-managed JSON files.
-push_pr_json_files() {
+# Return success when a repository JSON path is excluded from missing-file
+# discovery. A PR-touched file is added separately and therefore still wins.
+is_json_file_ignored() {
+  local file_path="$1"
+
+  if [ "$file_path" = "config/settings_data.json" ] || [ "$file_path" = "config/markets.json" ]; then
+    return 0
+  fi
+
+  if [ -n "$IGNORE_FILES" ]; then
+    local pattern
+    local -a patterns=()
+    IFS=',' read -ra patterns <<< "$IGNORE_FILES"
+    for pattern in "${patterns[@]}"; do
+      pattern=$(echo "$pattern" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+      if [ -n "$pattern" ] && [[ "$file_path" == $pattern ]]; then
+        return 0
+      fi
+    done
+  fi
+
+  return 1
+}
+
+# Push the union of repository JSON missing from the preview and every JSON
+# file touched by the PR. Explicit --only flags protect all other JSON.
+push_preview_json_files() {
   local theme_id="$1"
   local theme_path="${THEME_ROOT:-.}"
+  local remote_theme_path
+  local pull_output
+  local pull_status=0
   local push_output
   local push_status=0
   local parsed_json
   local error_count
   local warning_message
   local file_path
-  local -a pr_json_files=()
+  local -A selected_json_files=()
   local -a push_args=()
 
-  if [ "${PR_FILES_LOOKUP_OK:-false}" != "true" ] || [ ! -f "${PR_CHANGED_FILES_FILE:-}" ]; then
-    echo "⚠️ PR changed-file list unavailable; skipping PR-specific JSON push"
-    return 0
+  remote_theme_path=$(mktemp -d)
+
+  echo "🔎 Checking for repository JSON files missing from theme ID: ${theme_id}..."
+  set +e -f
+  pull_output=$(shopify theme pull \
+    --theme "$theme_id" \
+    --path "$remote_theme_path" \
+    --only="*.json" \
+    --nodelete \
+    --no-color 2>&1)
+  pull_status=$?
+  set -e +f
+
+  if [ "$pull_status" -ne 0 ]; then
+    echo "❌ Could not read the target theme's JSON file list"
+    printf '%s\n' "$pull_output"
+    THEME_ERRORS="Failed to inspect existing theme JSON files: $pull_output"
+    LAST_UPLOAD_OUTPUT="$pull_output"
+    rm -rf "$remote_theme_path"
+    return 1
   fi
 
-  while IFS= read -r file_path; do
-    if [[ "$file_path" == *.json ]]; then
-      if [ -f "$theme_path/$file_path" ]; then
-        pr_json_files+=("$file_path")
-      else
-        echo "⏭️ PR-touched JSON is absent from the checkout (likely deleted): ${file_path}"
-      fi
+  while IFS= read -r -d '' file_path; do
+    file_path="${file_path#./}"
+    if ! is_json_file_ignored "$file_path" && [ ! -f "$remote_theme_path/$file_path" ]; then
+      selected_json_files["$file_path"]=1
     fi
-  done < "$PR_CHANGED_FILES_FILE"
+  done < <(
+    cd "$theme_path"
+    find config layout locales sections templates -type f -name '*.json' -print0 2>/dev/null
+  )
 
-  if [ "${#pr_json_files[@]}" -eq 0 ]; then
-    echo "✅ No PR-touched JSON files to push"
+  if [ "${PR_FILES_LOOKUP_OK:-false}" = "true" ] && [ -f "${PR_CHANGED_FILES_FILE:-}" ]; then
+    while IFS= read -r file_path; do
+      if [[ "$file_path" == *.json ]]; then
+        if [ -f "$theme_path/$file_path" ]; then
+          selected_json_files["$file_path"]=1
+        else
+          echo "⏭️ PR-touched JSON is absent from the checkout (likely deleted): ${file_path}"
+        fi
+      fi
+    done < "$PR_CHANGED_FILES_FILE"
+  else
+    echo "⚠️ PR changed-file list unavailable; pushing missing repository JSON only"
+  fi
+
+  if [ "${#selected_json_files[@]}" -eq 0 ]; then
+    echo "✅ No missing or PR-touched JSON files to push"
+    rm -rf "$remote_theme_path"
     return 0
   fi
 
-  echo "📄 Pushing ${#pr_json_files[@]} PR-touched JSON file(s):"
+  echo "📄 Pushing ${#selected_json_files[@]} missing or PR-touched JSON file(s):"
   push_args=(shopify theme push \
     --theme "$theme_id" \
     --path "$theme_path" \
@@ -272,10 +331,10 @@ push_pr_json_files() {
     --no-color \
     --json)
 
-  for file_path in "${pr_json_files[@]}"; do
+  while IFS= read -r file_path; do
     echo "  - ${file_path}"
     push_args+=("--only=${file_path}")
-  done
+  done < <(printf '%s\n' "${!selected_json_files[@]}" | sort)
 
   set +e -f
   push_output=$("${push_args[@]}" 2>&1)
@@ -287,6 +346,7 @@ push_pr_json_files() {
     echo "❌ Failed to push PR-touched JSON files"
     printf '%s\n' "$push_output"
     THEME_ERRORS="$push_output"
+    rm -rf "$remote_theme_path"
     return 1
   fi
 
@@ -303,6 +363,7 @@ push_pr_json_files() {
       THEME_ERRORS=$(echo "$parsed_json" | extract_json_value "" "format_errors")
       [ -z "$THEME_ERRORS" ] && THEME_ERRORS="$push_output"
       echo "❌ PR-touched JSON files failed theme validation"
+      rm -rf "$remote_theme_path"
       return 1
     fi
 
@@ -315,7 +376,8 @@ push_pr_json_files() {
     fi
   fi
 
-  echo "✅ PR-touched JSON files pushed successfully"
+  echo "✅ Missing and PR-touched JSON files pushed successfully"
+  rm -rf "$remote_theme_path"
   return 0
 }
 
@@ -598,7 +660,8 @@ create_theme_with_retry() {
 # Export functions for use in other scripts
 export -f build_ignore_flags
 export -f build_pr_pull_ignore_flags
-export -f push_pr_json_files
+export -f is_json_file_ignored
+export -f push_preview_json_files
 export -f cleanup_failed_theme
 export -f check_theme_exists_by_name
 export -f handle_theme_limit
