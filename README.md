@@ -353,7 +353,7 @@ The `no-sync` label **only affects initial theme creation**:
 - **WITH `no-sync`**: Skip pulling settings from production/source theme, use repo's JSON files
 - **WITHOUT `no-sync`**: Pull settings from production/source theme before creating
 
-**Important:** The `no-sync` label does not affect theme updates. Existing JSON files are preserved regardless of the label. Repository JSON files that do not yet exist on the preview theme are added individually.
+**Important:** The `no-sync` label does not affect theme updates. JSON files that are not touched by the PR remain protected. Any JSON file touched by the PR is pushed individually so the PR version wins.
 
 **When to use `no-sync` label:**
 - Creating a theme with completely new settings structure
@@ -367,8 +367,8 @@ The `no-sync` label **only affects initial theme creation**:
 |----------|--------------|--------|
 | Initial theme creation | No | Pull JSON from production → Push all files including JSON |
 | Initial theme creation | Yes | Don't pull from production → Push all files including JSON from repo |
-| Theme update (exists) | No | Preserve existing JSON settings; add only new repository JSON files |
-| Theme update (exists) | Yes | Preserve existing JSON settings; add only new repository JSON files |
+| Theme update (exists) | No | Preserve untouched JSON settings; explicitly push PR-touched JSON files |
+| Theme update (exists) | Yes | Preserve untouched JSON settings; explicitly push PR-touched JSON files |
 
 **Note:** Locale default files (like `en.default.json`) are always updated even during theme updates to ensure translation changes are applied.
 
@@ -380,22 +380,22 @@ The `no-sync` label **only affects initial theme creation**:
 
 ### Files Preserved During Updates
 
-When updating existing themes, the following JSON files are **preserved when they already exist on the preview theme**:
+When updating existing themes, the following JSON files are **preserved unless the PR touches them**:
 - `templates/*.json` - Template settings
 - `sections/*.json` - Section settings
 - `layout/*.json` - Layout settings
 - `config/settings_data.json` - Theme settings
 - `config/markets.json` - Shopify-generated market settings
 
-Repository JSON files that are missing from the preview theme are detected from a separate remote pull and added with explicit per-file `--only` flags. This allows a PR to introduce a new JSON template without blanket-pushing merchant-managed JSON settings.
+The action fetches the PR's complete changed-file list from GitHub. During settings sync, PR-touched JSON and `blocks/*.liquid` files are excluded from the live/source pull. After the normal upload, every PR-touched JSON file still present in the checkout is pushed with an explicit per-file `--only` flag. This makes both new and modified PR JSON win without blanket-pushing merchant-managed JSON that the PR did not touch.
 
 **Files that ARE updated:**
 - All `.liquid` files (templates, sections, snippets, layout)
 - All asset files (CSS, JS, images, fonts)
 - Locale default files (`locales/*.default.json`) - to apply translation updates
-- New JSON files that do not already exist on the preview theme
+- New or modified JSON files touched by the PR
 
-**Known limitation:** A PR that modifies an existing JSON template will still show the preview theme's current copy. On creation or a `rebuild-theme` run, the settings-preservation pull overwrites the repository copy before upload. On a normal update, protected JSON paths are not pushed. This deliberately prevents merchant-edited settings from being replaced. Only new JSON files are added from the repository.
+**Known limitation:** A JSON file deleted by a PR remains on the preview theme. Settings pulls and targeted pushes use `--nodelete` so preview deployment never deletes remote files.
 
 **Note:** The `no-sync` label does not change update behavior. It only affects whether settings are pulled from production during initial theme creation.
 
