@@ -343,7 +343,10 @@ push_missing_json_files() {
     fi
 
     if [ -n "$warning_message" ] && [ "$warning_message" != "null" ]; then
-      THEME_ERRORS="${THEME_ERRORS:+${THEME_ERRORS}\n}${warning_message}"
+      if [ -n "$THEME_ERRORS" ]; then
+        THEME_ERRORS+=$'\n'
+      fi
+      THEME_ERRORS+="$warning_message"
       export THEME_ERRORS
     fi
   fi
