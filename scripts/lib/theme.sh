@@ -218,7 +218,7 @@ build_ignore_flags() {
 is_json_file_ignored() {
   local file_path="$1"
 
-  if [ "$file_path" = "config/settings_data.json" ]; then
+  if [ "$file_path" = "config/settings_data.json" ] || [ "$file_path" = "config/markets.json" ]; then
     return 0
   fi
 
