@@ -250,7 +250,7 @@ if [ -n "${EXISTING_THEME_ID}" ]; then
     include_json_flag="true"
   fi
   
-  if upload_theme "${EXISTING_THEME_ID}" "$include_json_flag" && push_pr_json_files "${EXISTING_THEME_ID}"; then
+  if upload_theme "${EXISTING_THEME_ID}" "$include_json_flag" && push_preview_json_files "${EXISTING_THEME_ID}"; then
     echo "✅ Theme ${EXISTING_THEME_ID} updated successfully!"
     
     # Get preview URL for existing theme
@@ -350,7 +350,7 @@ else
   echo "⏭️ Skipping JSON configuration pull due to 'no-sync' label"
 fi
 
-if create_theme_with_retry "${THEME_NAME}" && push_pr_json_files "${CREATED_THEME_ID}"; then
+if create_theme_with_retry "${THEME_NAME}" && push_preview_json_files "${CREATED_THEME_ID}"; then
   echo "🎉 Theme created and deployed successfully!"
   
   # Get preview URL

@@ -387,7 +387,7 @@ When updating existing themes, the following JSON files are **preserved unless t
 - `config/settings_data.json` - Theme settings
 - `config/markets.json` - Shopify-generated market settings
 
-The action fetches the PR's complete changed-file list from GitHub. During settings sync, PR-touched JSON and `blocks/*.liquid` files are excluded from the live/source pull. After the normal upload, every PR-touched JSON file still present in the checkout is pushed with an explicit per-file `--only` flag. This makes both new and modified PR JSON win without blanket-pushing merchant-managed JSON that the PR did not touch.
+The action fetches the PR's complete changed-file list from GitHub. During settings sync, PR-touched JSON and `blocks/*.liquid` files are excluded from the live/source pull. After the normal upload, it explicitly pushes the union of repository JSON missing from the preview and every PR-touched JSON file still present in the checkout. This makes both new and modified PR JSON win without blanket-pushing merchant-managed JSON that the PR did not touch. If the PR file lookup fails, the action logs a warning and falls back to pushing missing repository JSON only.
 
 **Files that ARE updated:**
 - All `.liquid` files (templates, sections, snippets, layout)
