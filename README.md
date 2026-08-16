@@ -385,6 +385,7 @@ When updating existing themes, the following JSON files are **preserved when the
 - `sections/*.json` - Section settings
 - `layout/*.json` - Layout settings
 - `config/settings_data.json` - Theme settings
+- `config/markets.json` - Shopify-generated market settings
 
 Repository JSON files that are missing from the preview theme are detected from a separate remote pull and added with explicit per-file `--only` flags. This allows a PR to introduce a new JSON template without blanket-pushing merchant-managed JSON settings.
 
